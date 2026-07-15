@@ -19,6 +19,53 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <stdint.h>
+//Step 3
+typedef uint32_t u32;
+typedef unsigned char byte;
+#define PAYLOAD_LEN 160
+#define TYPE_DATA 1
+#define TYPE_PARITY  2
+#define GROUP_SIZE   2
+#define PKT_LEN (1 + 4 + PAYLOAD_LEN)
+#define GROUP_WINDOW 4096
+static void put_u32(byte *p, u32 value)
+{
+    p[0] = (byte)(value>>24);
+    p[1] = (byte)(value>>16);
+    p[2] = (byte)(value>>8);
+    p[3] = (byte)value;
+}
+static u32 get_u32(const byte *p)
+{
+    return ((u32)p[0]<<24)|((u32)p[1]<<16)|((u32)p[2]<<8)|(u32)p[3];
+}
+//Step 3: Store one FEC group.
+typedef struct
+{
+    u32 group_id;
+    int valid;
+    byte received_mask;
+    int has_parity;
+    byte payload[GROUP_SIZE][PAYLOAD_LEN];
+    byte parity[PAYLOAD_LEN];
+
+}Group;
+
+static Group groups[GROUP_WINDOW];
+
+//Step 3: Get the storage corresponding to a group.
+Group *get_group(u32 group_id)
+{
+    Group *g = &groups[group_id%GROUP_WINDOW];
+    if (!g->valid||g->group_id!=group_id)
+    {
+        memset(g,0,sizeof(*g));
+        g->group_id = group_id;
+        g->valid = 1;
+    }
+    return g;
+}
 
 int main(void) {
     int in_fd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -36,14 +83,40 @@ int main(void) {
     player.sin_family = AF_INET;
     player.sin_port = htons(47020);
     player.sin_addr.s_addr = inet_addr("127.0.0.1");
-
-    unsigned char buf[2048];
+    //Step 3: Receive packet in our protocol.
+    byte buf[2048];
+    byte out_pkt[4+PAYLOAD_LEN];
     for (;;) {
         ssize_t n = recvfrom(in_fd, buf, sizeof buf, 0, NULL, NULL);
-        if (n <= 0) continue;
-        /* jitter buffer / reorder / recovery logic goes here */
-        sendto(out_fd, buf, (size_t)n, 0, (struct sockaddr *)&player,
-               sizeof player);
+        if(n!=PKT_LEN)continue;
+        //Step 3: Decode our packet.
+        byte type = buf[0];
+        u32 field = get_u32(buf+1);
+        const byte *payload = buf+5;
+        Group *g;
+        if(type==TYPE_DATA)
+        {
+            u32 seq = field;
+            u32 group_id = seq/GROUP_SIZE;
+            u32 pos = seq%GROUP_SIZE;
+            g = get_group(group_id);
+            if(!(g->received_mask&(1<<pos)))
+            {
+                memcpy(g->payload[pos],payload,PAYLOAD_LEN);
+                g->received_mask |= (1<<pos);
+            }
+        }
+        else if(type==TYPE_PARITY)
+        {
+            u32 group_id = field;
+            g = get_group(group_id);
+            if(!g->has_parity)
+            {
+                memcpy(g->parity,payload,PAYLOAD_LEN);
+                g->has_parity = 1;
+            }
+        }
+        else continue;
     }
     return 0;
 }
