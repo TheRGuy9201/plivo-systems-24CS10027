@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Reliable UDP Streaming System Summary</title>
+<style>
+body{
+    font-family:Arial,Helvetica,sans-serif;
+    margin:40px;
+    line-height:1.6;
+}
+h1,h2{
+    color:#1f4e79;
+}
+code{
+    background:#f4f4f4;
+    padding:2px 4px;
+}
+table{
+    border-collapse:collapse;
+    width:100%;
+}
+th,td{
+    border:1px solid #ccc;
+    padding:8px;
+}
+</style>
+</head>
+
+<body>
+
+<h1>Reliable UDP Streaming System</h1>
+
+<h2>Objective</h2>
+
+<p>
+The objective of this project is to improve reliability of real-time UDP media streaming
+over a hostile network while satisfying strict playback deadlines.
+</p>
+
+<h2>Architecture</h2>
+
+<pre>
+Source
+   │
+   ▼
+Sender
+   │
+   ▼
+Hostile Relay
+   │
+   ▼
+Receiver
+   │
+   ▼
+Player
+</pre>
+
+<h2>Sender Design</h2>
+
+<ul>
+<li>Receives frames from the harness.</li>
+<li>Creates a custom packet format.</li>
+<li>Sends every frame as a DATA packet.</li>
+<li>Groups frames in pairs.</li>
+<li>Generates one XOR parity packet for each group.</li>
+</ul>
+
+<h2>Receiver Design</h2>
+
+<ul>
+<li>Parses DATA and PARITY packets.</li>
+<li>Stores packets using group-based buffering.</li>
+<li>Uses XOR parity to recover one missing frame.</li>
+<li>Forwards both original and reconstructed frames to the player.</li>
+</ul>
+
+<h2>Packet Format</h2>
+
+<pre>
++---------+--------------+--------------+
+| Type    | Seq/Group ID | Payload      |
++---------+--------------+--------------+
+</pre>
+
+<p>
+Type = DATA or PARITY.
+</p>
+
+<h2>Forward Error Correction</h2>
+
+<p>
+For every two frames, one parity packet is generated:
+</p>
+
+<pre>
+Parity = Frame0 XOR Frame1
+</pre>
+
+<p>
+If exactly one frame is lost, it can be reconstructed using:
+</p>
+
+<pre>
+Missing = Parity XOR Remaining Frame
+</pre>
+
+<h2>Current Limitations</h2>
+
+<ul>
+<li>No packet reordering.</li>
+<li>No jitter buffer.</li>
+<li>No retransmission.</li>
+<li>Cannot recover multiple losses within a group.</li>
+</ul>
+
+<h2>Future Work</h2>
+
+<ul>
+<li>Packet reordering.</li>
+<li>Adaptive playback buffer.</li>
+<li>ACK/NACK-based retransmission.</li>
+<li>Adaptive FEC group sizing.</li>
+<li>Duplicate suppression.</li>
+</ul>
+
+</body>
+</html>

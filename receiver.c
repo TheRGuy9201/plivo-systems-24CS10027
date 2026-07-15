@@ -159,7 +159,19 @@ int main(void) {
             }
         }
         else continue;
-        try_reconstruct(g)//Step 4: recovering a missing packet
+        try_reconstruct(g);//Step 4: recovering a missing packet
+        //Step 5: Forward every packet that is available but has not yet been forwarded.
+        for(int p = 0; p < GROUP_SIZE; p++)
+        {
+            if((g->received_mask&(1<<p))&&!(g->forwarded_mask&(1<<p)))
+            {
+                u32 seq = g->group_id*GROUP_SIZE+p;
+                put_u32(out_pkt, seq);
+                memcpy(out_pkt+4,g->payload[p],PAYLOAD_LEN);
+                sendto(out_fd,out_pkt,sizeof(out_pkt),0,(struct sockaddr *)&player,sizeof(player));
+                g->forwarded_mask|=(1<<p);
+            }
+        }
     }
     return 0;
 }
