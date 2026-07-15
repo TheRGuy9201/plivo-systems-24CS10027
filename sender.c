@@ -28,6 +28,9 @@ typedef unsigned char byte;
 #define PAYLOAD_LEN 160
 // Step 1: Packet type for normal data packets.
 #define TYPE_DATA 1
+#define TYPE_PARITY  2      // Step 2: Packet carrying XOR parity
+// Step 2: Number of frames protected by one parity packet.
+#define GROUP_SIZE   2
 // Step 1: Our custom packet size.
 #define PKT_LEN (1 + 4 + PAYLOAD_LEN)
 
@@ -68,17 +71,54 @@ int main(void)
     byte in_buf[2048];
     /* Step 1: Outgoing packet in our own protocol */
     byte out_pkt[PKT_LEN];
-
+    // Step 2: Store one group's payloads before computing parity.
+    byte group_payload[GROUP_SIZE][PAYLOAD_LEN];
+    u32 current_group = 0;
+    // Indicates whether we are currently building a group.
+    int have_group = 0;
     for (;;)
     {
         ssize_t n = recvfrom(in_fd,in_buf,sizeof(in_buf),0,NULL,NULL);
         if (n<(ssize_t)(4+PAYLOAD_LEN))continue;
         u32 seq = get_u32(in_buf);
         const byte *payload = in_buf + 4;
+        // Step 2: Send the normal DATA packet.
         out_pkt[0] = TYPE_DATA;
-        put_u32(out_pkt+1,seq);
-        memcpy(out_pkt+5,payload,PAYLOAD_LEN);
+        put_u32(out_pkt + 1, seq);
+        memcpy(out_pkt + 5, payload, PAYLOAD_LEN);
         sendto(out_fd,out_pkt,PKT_LEN,0,(struct sockaddr *)&relay,sizeof(relay));
+        // Step 2: Build XOR parity for every GROUP_SIZE packets.
+        u32 group_id = seq / GROUP_SIZE;
+        u32 pos      = seq % GROUP_SIZE;
+        if(!have_group || group_id!=current_group)
+        {
+            memset(group_payload, 0, sizeof(group_payload));
+            current_group = group_id;
+            have_group = 1;
+        }
+        memcpy(group_payload[pos],payload,PAYLOAD_LEN);
+        // Last packet?
+        if(pos==GROUP_SIZE-1)
+        {
+            byte parity[PAYLOAD_LEN];
+            memset(parity, 0, PAYLOAD_LEN);
+            // XOR every payload byte.
+            for (int i = 0; i < GROUP_SIZE; i++)
+            {
+                for (int j = 0; j < PAYLOAD_LEN; j++)
+                {
+                    parity[j]^=group_payload[i][j];
+                }
+            }
+            // Send parity packet.
+            out_pkt[0] = TYPE_PARITY;
+            // Store group number instead of sequence number.
+            put_u32(out_pkt+1,current_group);
+            memcpy(out_pkt+5,parity,PAYLOAD_LEN);
+            sendto(out_fd,out_pkt,PKT_LEN,0,(struct sockaddr *)&relay,sizeof(relay));
+            // Ready for next group.
+            have_group = 0;
+        }
     }
     return 0;
 }
