@@ -46,6 +46,7 @@ typedef struct
     u32 group_id;
     int valid;
     byte received_mask;
+    byte forwarded_mask;     // Step 4: Will track forwarded packets later.
     int has_parity;
     byte payload[GROUP_SIZE][PAYLOAD_LEN];
     byte parity[PAYLOAD_LEN];
@@ -65,6 +66,47 @@ Group *get_group(u32 group_id)
         g->valid = 1;
     }
     return g;
+}
+
+//Step 4: Count number of received packets in a group.
+int popcount8(byte mask)
+{
+    int cnt = 0;
+    while(mask)
+    {
+        cnt+=(mask&1);
+        mask>>=1;
+    }
+    return cnt;
+}
+//Step 4: Recovering one missing packet using XOR parity.
+void try_reconstruct(Group *g)
+{
+    if(!g->has_parity)return;
+    // Need exactly one missing packet.
+    if(popcount8(g->received_mask)!=GROUP_SIZE-1)return;
+    int missing = -1;
+    for(int i = 0; i < GROUP_SIZE; i++)
+    {
+        if(!(g->received_mask&(1<<i)))
+        {
+            missing = i;
+            break;
+        }
+    }
+    if(missing==-1)return;
+    byte rebuilt[PAYLOAD_LEN];
+    memcpy(rebuilt,g->parity,PAYLOAD_LEN);
+    for(int i = 0; i<GROUP_SIZE; i++)
+    {
+        if(i==missing)continue;
+        for(int j = 0; j<PAYLOAD_LEN; j++)
+        {
+            rebuilt[j]^=g->payload[i][j];
+        }
+    }
+    memcpy(g->payload[missing],rebuilt,PAYLOAD_LEN);
+    g->received_mask|=(1<<missing);
 }
 
 int main(void) {
@@ -117,6 +159,7 @@ int main(void) {
             }
         }
         else continue;
+        try_reconstruct(g)//Step 4: recovering a missing packet
     }
     return 0;
 }
